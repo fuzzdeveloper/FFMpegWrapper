@@ -1,0 +1,1 @@
+int GetVideoInputDevices(char** videoInputDevices);
