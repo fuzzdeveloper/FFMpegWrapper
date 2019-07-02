@@ -42,14 +42,17 @@ namespace WpfExample
         private readonly bool CameraFlipV;
         private readonly bool CameraTranspose;
 
+        private readonly object BgrImageLock = new object();
         private byte[] BgrImage = null;
+        private int BgrImageW = -1;
+        private int BgrImageH = -1;
 
         private volatile bool mRunning = false;
 
         private long LastFrameTime = 0;
-        private double fpssmoothed = -1.0;
+        private double FpsSmoothed = -1.0;
 
-        public FFMpegCamera()
+        public FFMpegCamera()//TODO: this constructor is a bit big isn't it?
         {
             MyErrorCallback = (IntPtr ptr, int len) =>
             {
@@ -75,36 +78,52 @@ namespace WpfExample
                     thread.Start();
                 }
             };
+
             MyImageCallback = (IntPtr ptr, int len, int w, int h) =>
             {
-                FFMpegCameraFrameHandler cameraFrameHandler = CameraFrame;
-                if (cameraFrameHandler != null)
+                PrintFPS();
+                //wrapper may (though currently doesn't) supply bad parameters to signal camera stream is finished
+                if (mRunning && ptr != null && len > 0 && w > 0 & h > 0)
                 {
-                    if (BgrImage == null || BgrImage.Length != len)
+                    lock (BgrImageLock)
                     {
-                        BgrImage = new byte[len];
+                        if (mRunning)//may have changed if we've been waiting for lock for a while
+                        {
+                            if (BgrImage == null || BgrImage.Length != len)
+                            {
+                                BgrImage = new byte[len];
+                            }
+                            Marshal.Copy(ptr, BgrImage, 0, len);
+                            BgrImageW = w;
+                            BgrImageH = h;
+
+                            FFMpegCameraFrameHandler cameraFrame = CameraFrame;
+                            if (null != cameraFrame)
+                            {
+                                //FFMpegCameraFrameHandler's should return quickly (because this callback blocks the wrapper from
+                                //getting more frames), they also probably shouldn't use the array after they return (though in practice they
+                                //can get away with using it for a brief period - as long as they are done before next time Marshal.Copy()
+                                //line above is executed)
+
+                                //anything that performs much work on the frame (and especially things that won't make use of every frame captured)
+                                //should probably call GetCameraFrame rather than implementing a FFMpegCameraFrameHandler
+                                cameraFrame(BgrImage, BgrImageW, BgrImageH);
+                            }
+                            Monitor.PulseAll(BgrImageLock);
+                            return;
+                        }
                     }
-
-                    //byte[] bgrImage = FrameArrayPool.Rent(len);
-                    Marshal.Copy(ptr, BgrImage, 0, len);
-                    //the array must be copied (because it is re-used by wrapper next frame) but after copying this method
-                    //should return ASAP because we're blocks camera from grabbing more frames.
-
-                    //The FFMpegCameraFrameHandler instances should probably make their own copy of the array before returning
-                    //(though in practice they don't *have* to as long as they finish with it quickly). If you want to do something
-                    //with these frames that may take some time you should probably make a copy (ideally to an array that it reuses
-                    //or one from an arraypool).
-
-                    cameraFrameHandler(BgrImage, w, h);
-                   
-                    long timesince = DateTime.Now.Ticks - LastFrameTime;
-                    LastFrameTime += timesince;
-                    double ffps = 10000000.0 / (double)timesince;
-                    fpssmoothed = fpssmoothed == -1.0 ? ffps : ((fpssmoothed * 5.0 + ffps) / 6.0);
-                    Console.WriteLine("time: " + timesince + "\t  fps: " + ffps + "\t  fpssmoothed: " + fpssmoothed);
                 }
-
+                //we'll end up here if mRunning is false or if ffmpegwrappe called with bad parameters
+                lock (BgrImageLock)
+                {
+                    BgrImage = null;
+                    BgrImageW = -1;
+                    BgrImageH = -1;
+                    Monitor.PulseAll(BgrImageLock);
+                }
             };
+
             CameraSource = ConfigurationManager.AppSettings["CameraSource"];
             int index;
             if (int.TryParse(CameraSource, out index))
@@ -121,10 +140,10 @@ namespace WpfExample
             }
 
             CameraCodec = ConfigurationManager.AppSettings["CameraCodec"];
-            int fps = Convert.ToInt32(ConfigurationManager.AppSettings["CameraFPS"]);
+            int fps = GetIntSetting("CameraFPS");
             CameraFPS = fps > 0 ? "" + fps : null;
-            int resX = Convert.ToInt32(ConfigurationManager.AppSettings["CameraResX"]);
-            int resY = Convert.ToInt32(ConfigurationManager.AppSettings["CameraResY"]);
+            int resX =  GetIntSetting("CameraResX");
+            int resY = GetIntSetting("CameraResY");
             if (resX > 0 && resY > 0)
             {
                 CameraRes = resX + "x" + resY;
@@ -133,7 +152,9 @@ namespace WpfExample
             {
                 CameraRes = null;
             }
+
             CameraShowSettings = Convert.ToBoolean(ConfigurationManager.AppSettings["CameraShowSettings"]);
+
             string[] cc = ConfigurationManager.AppSettings["CameraCrop"].Split(',');
             if (cc.Length == 4)
             {
@@ -148,8 +169,8 @@ namespace WpfExample
                 CameraCropY = -1;
                 CameraCropW = -1;
                 CameraCropH = -1;
-
             }
+
             int cameraRotation = Convert.ToInt32(ConfigurationManager.AppSettings["CameraRotation"]);
             switch (cameraRotation)
             {
@@ -178,6 +199,26 @@ namespace WpfExample
             }
         }
 
+        private void PrintFPS()
+        {
+            long timesince = DateTime.Now.Ticks - LastFrameTime;
+            LastFrameTime += timesince;
+            double fps = 10000000.0 / (double)timesince;
+            FpsSmoothed = FpsSmoothed == -1.0 ? fps : ((FpsSmoothed * 5.0 + fps) / 6.0);
+            Console.WriteLine("time: " + timesince + "\t  fps: " + fps + "\t  FpsSmoothed: " + FpsSmoothed);
+        }
+
+        private static int GetIntSetting(string key)
+        {
+            string val = ConfigurationManager.AppSettings[key];
+            int intval;
+            if (int.TryParse(val, out intval))
+            {
+                return intval;
+            }
+            return -1;
+        }
+
         private void Start(bool cameraShowSettings)
         {
             start(strToBA(CameraSource), strToBA(CameraCodec), strToBA(CameraFPS), strToBA(CameraRes), cameraShowSettings, false, CameraCropX, CameraCropY, CameraCropW, CameraCropH, CameraFlipH, CameraFlipV, CameraTranspose, MyErrorCallback, MyImageCallback);
@@ -187,13 +228,53 @@ namespace WpfExample
         {
             mRunning = true;
             Start(CameraShowSettings);
-
         }
 
         public void Stop()
         {
             mRunning = false;
             stop();
+            lock (BgrImageLock)
+            {
+                Monitor.PulseAll(BgrImageLock);//wake up anything stuck in a GetCameraFrame call
+            }
+        }
+
+        public byte[] GetCameraFrame(out int width, out int height)
+        {
+            if (!mRunning) {
+                width = -1;
+                height = -1;
+                return null;
+            }
+            byte[] retVal;
+            lock (BgrImageLock)
+            {
+                while (BgrImage == null && mRunning)
+                {
+                    Monitor.Wait(BgrImageLock);
+                }
+                if (mRunning)
+                {
+                    retVal = BgrImage;
+                    width = BgrImageW;
+                    height = BgrImageH;
+                }
+                else
+                {
+                    retVal = null;
+                    width = -1;
+                    height = -1;
+                }
+                BgrImage = null;
+                //the above not only ensures the same frame isn't returned twice
+                //but that the byte array won't be re-used for next camera frame
+                //(thereby potentially writing a new frame into it as it is still
+                //being used).
+                //ideally we should do something to manage the arrays we allocate
+                //(eg: use an ArrayPool)
+            }
+            return retVal;
         }
 
         private static string GetDeviceNameFromIndex(int n)

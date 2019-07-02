@@ -19,15 +19,6 @@ extern "C"
 std::thread _thread;
 std::atomic<bool> _running(false);
 
-bool _initialised;
-int _width;
-int _height;
-int _size;
-uint8_t* _buf1;
-uint8_t* _buf2;
-bool _which;
-
-
 void sendError(error_callback_t error_callback, const char* error) {
     error_callback((char*)error, (int)strlen(error));
 }
@@ -297,6 +288,7 @@ void loop(char* device_name, char* vcodec, char* framerate, char* video_size, bo
     _running = false;
     return;
 }
+
 void __stdcall start(char* device_name, char* vcodec, char* framerate, char* video_size, bool show_video_device_dialog, bool no_convert, int crop_x, int crop_y, int crop_w, int crop_h, bool flip_h, bool flip_v, bool transpose, error_callback_t error_callback, image_callback_t image_callback)
 {
     stop();

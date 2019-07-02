@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -8,8 +9,10 @@ namespace WpfExample
 {
     public partial class MainWindow : Window
     {
+        private static readonly bool USE_FRAME_HANDLER = true;
         private readonly FFMpegCamera MyFFMpegCamera;
         private WriteableBitmap DisplayedBitmap = null;
+        private volatile bool GrabCameraFrameThreadRunning = false;
 
         public MainWindow()
         {
@@ -46,16 +49,49 @@ namespace WpfExample
             }));
         }
 
+        private void GrabCameraFrameLoop()
+        {
+            byte[] bgrImage;
+            int bgrWidth;
+            int bgrHeight;
+            while (GrabCameraFrameThreadRunning)
+            {
+                bgrImage = MyFFMpegCamera.GetCameraFrame(out bgrWidth, out bgrHeight);
+                if (bgrImage == null || bgrWidth <= 0 || bgrHeight <= 0)
+                {
+                    break;
+                }
+                CameraFrame(bgrImage, bgrWidth, bgrHeight);
+            }
+        }
+
         private void Window_Loaded(object sender, EventArgs e)
         {
-            //you can do this in constructor too
-            MyFFMpegCamera.CameraFrame += CameraFrame;
+            //you can start camera in constructor too, the wrapper isn't as sensitive to how it is started as EMGU/OpenCV
+            if (USE_FRAME_HANDLER)
+            {
+                MyFFMpegCamera.CameraFrame += CameraFrame;
+            }
+            else
+            {
+                GrabCameraFrameThreadRunning = true;
+                Thread thread = new Thread(new ThreadStart(GrabCameraFrameLoop));
+                thread.IsBackground = true;
+                thread.Start();
+            }
             MyFFMpegCamera.Start();
         }
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
-            MyFFMpegCamera.CameraFrame -= CameraFrame;
+            if (USE_FRAME_HANDLER)
+            {
+                MyFFMpegCamera.CameraFrame -= CameraFrame;
+            }
+            else
+            {
+                GrabCameraFrameThreadRunning = false;
+            }
             MyFFMpegCamera.Stop();
         }
     }
