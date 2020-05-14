@@ -120,7 +120,16 @@ void loop(char* device_name, char* vcodec, char* framerate, char* video_size, bo
     AVFrame *pFrame;
     struct SwsContext *img_convert_ctx;
 
-    avdevice_register_all();
+	if (device_name == NULL) {
+		device_name = GetFirstVideoInputDevice();
+		if (device_name == NULL) {
+			sendError(error_callback, "Couldn't find any input devices.");
+			_running = false;
+			return;
+		}
+	}
+	
+	avdevice_register_all();
 
     //Show Dshow Device
     //    show_dshow_device();
@@ -129,17 +138,17 @@ void loop(char* device_name, char* vcodec, char* framerate, char* video_size, bo
 
     pInputFormat = av_find_input_format("dshow");
     pDictionary = NULL;
-    if (vcodec != NULL) {
-        av_dict_set(&pDictionary, "vcodec", vcodec, 0);
-    }
-    if (framerate != NULL) {
+	if (show_video_device_dialog) {
+		av_dict_set(&pDictionary, "show_video_device_dialog", "true", 0);
+	}
+	if (vcodec != NULL) {
+		av_dict_set(&pDictionary, "vcodec", vcodec, 0);
+	}
+	if (framerate != NULL) {
         av_dict_set(&pDictionary, "framerate", framerate, 0);
     }
     if (video_size != NULL) {
         av_dict_set(&pDictionary, "video_size", video_size, 0);
-    }
-    if (show_video_device_dialog) {
-        av_dict_set(&pDictionary, "show_video_device_dialog", "true", 0);
     }
     pFormatContext = avformat_alloc_context();
     sprintf(str, "video=%s", device_name);

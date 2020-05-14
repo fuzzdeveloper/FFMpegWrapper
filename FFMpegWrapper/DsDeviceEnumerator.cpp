@@ -26,12 +26,13 @@ HRESULT EnumerateDevices(REFGUID category, IEnumMoniker **ppEnum)
 	}
 	return hr;
 }
-int GetDeviceInformation(IEnumMoniker *pEnum, char** videoInputDevices)
+
+int GetDeviceInformation(IEnumMoniker *pEnum, char** videoInputDevices, int maxDevices)
 {
 	int count = 0;
 	IMoniker *pMoniker = NULL;
 
-	while (pEnum->Next(1, &pMoniker, NULL) == S_OK)
+	while (count < maxDevices && pEnum->Next(1, &pMoniker, NULL) == S_OK)
 	{
 		IPropertyBag *pPropBag;
 		HRESULT hr = pMoniker->BindToStorage(0, 0, IID_PPV_ARGS(&pPropBag));
@@ -76,11 +77,32 @@ int GetVideoInputDevices(char** videoInputDevices)
 		hr = EnumerateDevices(CLSID_VideoInputDeviceCategory, &pEnum);
 		if (SUCCEEDED(hr))
 		{
-			count = GetDeviceInformation(pEnum, videoInputDevices);
+			count = GetDeviceInformation(pEnum, videoInputDevices, 1024);
 			pEnum->Release();
 		}
 		if (uninit)
 			CoUninitialize();
 	}
 	return count;
+}
+
+char* GetFirstVideoInputDevice()
+{
+	int count = -1;
+	char* temp[1];
+	HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+	if (SUCCEEDED(hr) || (hr & 0x80010106) == 0x80010106)//TODO find better way to check if it's been initialised (0x80010106 means its already initialised in a different mode)
+	{
+		bool uninit = SUCCEEDED(hr);
+		IEnumMoniker *pEnum;
+		hr = EnumerateDevices(CLSID_VideoInputDeviceCategory, &pEnum);
+		if (SUCCEEDED(hr))
+		{
+			count = GetDeviceInformation(pEnum, temp, 1);
+			pEnum->Release();
+		}
+		if (uninit)
+			CoUninitialize();
+	}
+	return count > 0 ? temp[0] : NULL;
 }

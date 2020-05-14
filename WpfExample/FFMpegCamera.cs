@@ -125,17 +125,26 @@ namespace WpfExample
             };
 
             CameraSource = ConfigurationManager.AppSettings["CameraSource"];
-            int index;
-            if (int.TryParse(CameraSource, out index))
+            if (CameraSource != null)
             {
-                string source = GetDeviceNameFromIndex(index);
-                if (source == null)
-                {
-                    System.Windows.MessageBox.Show("Cannot find CameraSource: " + CameraSource, "Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
-                }
+                CameraSource = CameraSource.Trim();
+                if (CameraSource.Length == 0)
+                    CameraSource = null;
                 else
                 {
-                    CameraSource = source;
+                    int index;
+                    if (int.TryParse(CameraSource, out index))
+                    {
+                        string source = GetDeviceNameFromIndex(index);
+                        if (source == null)
+                        {
+                            System.Windows.MessageBox.Show("Cannot find CameraSource: " + CameraSource, "Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+                        }
+                        else
+                        {
+                            CameraSource = source;
+                        }
+                    }
                 }
             }
 
